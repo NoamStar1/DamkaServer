@@ -2,8 +2,6 @@
 # python "F:\Internet\Projects\Damka\server.py"
 
 import asyncio
-from asyncio.windows_events import NULL
-from genericpath import samestat
 import json
 import websockets
 
