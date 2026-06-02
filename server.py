@@ -91,7 +91,7 @@ async def HandlePlayer(player):
                     await enemy.send(json.dumps(enemyMessage))
 
 async def main():
-    async with websockets.serve(HandlePlayer, "localhost", 1234):
+    async with websockets.serve(HandlePlayer, "0.0.0.0", 10000):
         await asyncio.Future()
 
 if __name__ == "__main__":
