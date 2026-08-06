@@ -1,12 +1,66 @@
 # pip install websockets
+# pip install psycopg2-binary
 # python "F:\Internet\Projects\Damka\server.py"
+# not sleeping: uptimerobot.com
 
 import asyncio
 import json
-import websockets
+import websockets # online server
+import psycopg2 # data base (supabase.com)
+from psycopg2 import errors
 
+databaseUrl = "postgresql://postgres:damkadatabase8339@db.ywiazghmzxtdflwirwrg.supabase.co:5432/postgres"
 playingPlayers = []
 waitingPlayers = []
+
+
+def signUp(username, password):
+    try:
+        connection = psycopg2.connect(databaseUrl)
+        cursor = connection.cursor()
+
+        cursor.execute(
+            "INSERT INTO users (username, password) VALUES (%s, %s)",
+            (username, password)
+        )
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        return True
+    except errors.UniqueViolation:
+        if connection:
+            connection.rollback()
+        return False
+    except Exception as e:
+        if connection:
+            connection.rollback()
+        print(f"Error: {e}")
+        return False
+    finally:
+        if connection:
+            connection.close()
+
+def logIn(username, password):
+    try:
+        conn = psycopg2.connect(databaseUrl)
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "SELECT id FROM users WHERE username = %s AND password_hash = %s", (username, password)
+        )
+        user = cursor.fetchone()
+
+        cursor.close()
+        conn.close()
+
+        if user:
+            return True
+        return False
+       
+    except Exception:
+        return False
+
 
 async def HandlePlayer(player):
     try:
@@ -68,6 +122,16 @@ async def HandlePlayer(player):
                 for playerData in waitingPlayers:
                     if playerData[0] == player:
                         waitingPlayers.remove(playerData)
+            elif action == "SignUp":
+                username = data.get("Username")
+                password = data.get("Password")
+                result = signUp(username, password)
+                message = {
+                    "Action": "SignUp",
+                    "Result": result
+                }
+                player.send(json.dumps(message))
+
 
 
     except websockets.exceptions.ConnectionClosedError:
@@ -96,3 +160,26 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
+def initDatabase():
+    try:
+        connection = psycopg2.connect(databaseUrl)
+        cursor = connection.cursor()
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                username VARCHAR(50) UNIQUE NOT NULL,
+                password VARCHAR(20) NOT NULL,
+                matches JSONB DEFAULT '[]'::jsonb
+            );
+        ''')
+
+        connection.commit()
+        cursor.close()
+        connection.close()
+        print("Database initialized successfully!")
+    except Exception as e:
+        print("Error connecting to Database:", e)
+
+initDatabase()
