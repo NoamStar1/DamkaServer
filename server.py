@@ -269,7 +269,7 @@ async def HandlePlayer(player):
 
             elif action == "RemovePlayer":
                 for playerData in waitingPlayers:
-                    if playerData[0] == player:
+                    if playerData[0][0] == player:
                         waitingPlayers.remove(playerData)
             elif action == "SignUp":
                 username = data.get("Username")
@@ -319,7 +319,7 @@ async def HandlePlayer(player):
     finally:
         # remove from witing list
         for playerData in waitingPlayers:
-            if playerData[0] == player:
+            if playerData[0][0] == player:
                 waitingPlayers.remove(playerData)
 
         # if in a match, send draw to the enemy and remove from list
