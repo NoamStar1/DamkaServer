@@ -313,6 +313,18 @@ async def HandlePlayer(player):
                         }
                         await player.send(json.dumps(message))
 
+            # set draw for the player who leaves the wesite
+            elif action == "UpdateEnemyHistory":
+                username = data.get("Username")
+                result = data.get("Result")
+                eats = data.get("Eats")
+                isOnline = data.get("IsOnline")
+                isSingle = data.get("IsSingle")
+                myTurn = data.get("MyTurn")
+                difficulty = data.get("Difficulty")
+                enemyName = data.get("EnemyName")
+                AddMatchToHistory(username, eats, result, isOnline, isSingle, myTurn, difficulty, enemyName)
+
 
     except websockets.exceptions.ConnectionClosedError:
         pass
@@ -330,6 +342,7 @@ async def HandlePlayer(player):
                     playingPlayers.remove(match)
                     enemyMessage = {
                         "Action": "GameOver",
+                        "Request": "EnemyUsername",
                         "Winner": "Draw"
                     }
                     await enemy.send(json.dumps(enemyMessage))
