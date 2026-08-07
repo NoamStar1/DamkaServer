@@ -5,13 +5,11 @@
 
 import asyncio
 import json
-from sys import addaudithook
-from psycopg2.sql import NULL
 import websockets # online server
 import psycopg2 # data base (supabase.com)
 from psycopg2 import errors
 
-databaseUrl = "postgresql://postgres:damkadatabase8339@db.ywiazghmzxtdflwirwrg.supabase.co:5432/postgres"
+databaseUrl = "postgresql://postgres.ywiazghmzxtdflwirwrg:damkadatabase8339@aws-0-eu-west-1.pooler.supabase.com:6543/postgres?sslmode=require"
 playingPlayers = []
 waitingPlayers = []
 
