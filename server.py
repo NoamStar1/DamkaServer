@@ -5,6 +5,8 @@
 
 import asyncio
 import json
+from sys import addaudithook
+from psycopg2.sql import NULL
 import websockets # online server
 import psycopg2 # data base (supabase.com)
 from psycopg2 import errors
@@ -15,6 +17,7 @@ waitingPlayers = []
 
 
 def signUp(username, password):
+    connection = False
     try:
         connection = psycopg2.connect(databaseUrl)
         cursor = connection.cursor()
@@ -32,34 +35,178 @@ def signUp(username, password):
         if connection:
             connection.rollback()
         return False
-    except Exception as e:
+    except Exception:
         if connection:
             connection.rollback()
-        print(f"Error: {e}")
         return False
     finally:
         if connection:
             connection.close()
 
 def logIn(username, password):
+    connection = False
     try:
-        conn = psycopg2.connect(databaseUrl)
-        cursor = conn.cursor()
+        connection = psycopg2.connect(databaseUrl)
+        cursor = connection.cursor()
 
         cursor.execute(
-            "SELECT id FROM users WHERE username = %s AND password_hash = %s", (username, password)
+            "SELECT username FROM users WHERE username = %s AND password = %s", 
+            (username, password)
         )
         user = cursor.fetchone()
 
         cursor.close()
-        conn.close()
+        connection.close()
 
         if user:
             return True
         return False
        
     except Exception:
+        if connection:
+            connection.rollback()
         return False
+
+    finally:
+        if connection:
+            connection.close()
+
+def AddMatchToHistory(username, eats, result, isOnline, isSingle, myTurn, difficulty, enemyName):
+    connection = False
+    try:
+        connection = psycopg2.connect(databaseUrl)
+        cursor = connection.cursor()
+        
+        # set all data
+        matchType = False
+        playerName = username
+        if isOnline:
+            matchType = "Online"
+            if (result == "White" and myTurn == 0) or (result == "Black" and myTurn == 1):
+                result = "WIN"
+            elif (result == "White" and myTurn == 1) or (result == "Black" and myTurn == 0):
+                result = "LOSE"
+            else:
+                result = "DRAW"
+
+        elif isSingle:
+            matchType = "Single-Player"
+            if result == "White":
+                result = "WIN"
+            elif result == "Black":
+                result = "LOSE"
+            else:
+                result = "DRAW"
+            if difficulty == 1:
+                enemyName = "Easy-AI"
+            elif difficulty == 2:
+                enemyName = "Medium-AI"
+            elif difficulty == 3:
+                enemyName = "Hard-AI"
+
+        else:
+            matchType = "Multiplayer"
+            playerName = "White"
+            enemyName = "Black"
+
+        newMatch = json.dumps([{
+            "MatchType": matchType,
+            "Result": result,
+            "Eats": eats,
+            "PlayerName": playerName,
+            "EnemyName": enemyName
+        }])
+
+        cursor.execute('''
+            UPDATE users
+            SET matches = (
+                SELECT COALESCE(jsonb_agg(elem ORDER BY ord), '[]'::jsonb)
+                FROM (
+                    SELECT elem, ord
+                    FROM jsonb_array_elements(COALESCE(matches, '[]'::jsonb) || %s::jsonb) WITH ORDINALITY AS t(elem, ord)
+                    ORDER BY ord DESC
+                    LIMIT 15
+                ) sub
+            )
+            WHERE username = %s;
+        ''', (newMatch, username))
+
+        connection.commit()
+        cursor.close()
+        return True
+
+    except Exception:
+        if connection:
+            connection.rollback()
+        return False
+    finally:
+        if connection:
+            connection.close()
+
+def GetMatchesHistory(username):
+    connection = False
+    try:
+        connection = psycopg2.connect(databaseUrl)
+        cursor = connection.cursor()
+
+        cursor.execute('''
+            SELECT matches 
+            FROM users 
+            WHERE username = %s;
+        ''', (username,))
+
+        row = cursor.fetchone()
+        cursor.close()
+
+        if row:
+            history = row[0]
+            return history
+        return False
+
+    except Exception as e:
+        print(f"Error in GetMatchesHistory: {e}")
+        return False
+    finally:
+        if connection:
+            connection.close()
+
+
+def initDatabase():
+    try:
+        connection = psycopg2.connect(databaseUrl)
+        cursor = connection.cursor()
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                username VARCHAR(50) UNIQUE NOT NULL,
+                password VARCHAR(20) NOT NULL,
+                matches JSONB DEFAULT '[]'::jsonb
+            );
+        ''')
+
+        connection.commit()
+        cursor.close()
+        connection.close()
+    except Exception as e:
+        print("Error connecting to Database:", e)
+
+initDatabase()
+
+def clearDatabase():
+    try:
+        connection = psycopg2.connect(databaseUrl)
+        cursor = connection.cursor()
+
+        cursor.execute("TRUNCATE TABLE users;")
+
+        connection.commit()
+        cursor.close()
+        connection.close()
+        print("Database cleared successfully!")
+    except Exception as e:
+        print("Error clearing database:", e)
+
+#clearDatabase()
 
 
 async def HandlePlayer(player):
@@ -68,31 +215,35 @@ async def HandlePlayer(player):
             data = json.loads(message)
             action = data.get("Action")
             if action == "WaitingPlayer":
+                playerUsername = data.get("Username")
                 settings = data.get("Settings")
                 playerData = [player, settings]
                 enemy = False
                 # try to find an enemy
                 for enemyData in waitingPlayers:
                     sameSettings = True
-                    enemySettings = enemyData[1]
+                    enemySettings = enemyData[0][1]
                     # check if both players has the same settings
                     for name in enemySettings:
                         if enemySettings[name] != settings[name] and name != "Sounds":
                             sameSettings = False
                             break
                     if sameSettings:
-                        enemy = enemyData[0]
+                        enemy = enemyData[0][0]
                         break
                 # if they have the same settings, take them into a game
                 if enemy:
+                    enemyUsername = enemyData[1]
                     waitingPlayers.remove(enemyData)
                     playingPlayers.append([player, enemy]) # add the players into game array
                     playerMessage = {
                         "Action": "StartGame",
+                        "EnemyName": enemyUsername or "Guest",
                         "Turn": 1,
                     }
                     enemyMessage = {
                         "Action": "StartGame",
+                        "EnemyName": playerUsername or "Guest",
                         "Turn": 0,
                     }
                     await player.send(json.dumps(playerMessage))
@@ -100,7 +251,7 @@ async def HandlePlayer(player):
 
                 # if didnt find enemy, add to the waiting list
                 else:
-                    waitingPlayers.append(playerData)
+                    waitingPlayers.append([playerData, playerUsername])
 
             elif action == "UpdateEnemy":
                 # find the enemy
@@ -128,10 +279,41 @@ async def HandlePlayer(player):
                 result = signUp(username, password)
                 message = {
                     "Action": "SignUp",
+                    "Username": username,
                     "Result": result
                 }
-                player.send(json.dumps(message))
-
+                await player.send(json.dumps(message))
+            elif action == "LogIn":
+                username = data.get("Username")
+                password = data.get("Password")
+                result = logIn(username, password)
+                history = GetMatchesHistory(username)
+                message = {
+                    "Action": "LogIn",
+                    "Username": username,
+                    "Result": result,
+                    "History": history
+                }
+                await player.send(json.dumps(message))
+            elif action == "AddMatch":
+                username = data.get("Username")
+                result = data.get("Result")
+                eats = data.get("Eats")
+                isOnline = data.get("IsOnline")
+                isSingle = data.get("IsSingle")
+                myTurn = data.get("MyTurn")
+                difficulty = data.get("Difficulty")
+                enemyName = data.get("EnemyName")
+                result = AddMatchToHistory(username, eats, result, isOnline, isSingle, myTurn, difficulty, enemyName)
+                if result:
+                    matchesHistory = GetMatchesHistory(username)
+                    if matchesHistory:
+                        message = {
+                            "Action": "UpdateMatchesHistory",
+                            "Username": username,
+                            "History": matchesHistory
+                        }
+                        await player.send(json.dumps(message))
 
 
     except websockets.exceptions.ConnectionClosedError:
@@ -160,26 +342,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-
-def initDatabase():
-    try:
-        connection = psycopg2.connect(databaseUrl)
-        cursor = connection.cursor()
-
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                username VARCHAR(50) UNIQUE NOT NULL,
-                password VARCHAR(20) NOT NULL,
-                matches JSONB DEFAULT '[]'::jsonb
-            );
-        ''')
-
-        connection.commit()
-        cursor.close()
-        connection.close()
-        print("Database initialized successfully!")
-    except Exception as e:
-        print("Error connecting to Database:", e)
-
-initDatabase()
