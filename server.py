@@ -27,13 +27,14 @@ def signUp(username, password):
         
         connection.commit()
         cursor.close()
-        connection.close()
         return True
     except errors.UniqueViolation:
+        print("SignUp: Username already exists")
         if connection:
             connection.rollback()
         return False
-    except Exception:
+    except Exception as e:
+        print(f"SignUp Exception: {e}")
         if connection:
             connection.rollback()
         return False
@@ -52,15 +53,15 @@ def logIn(username, password):
             (username, password)
         )
         user = cursor.fetchone()
-
         cursor.close()
-        connection.close()
 
         if user:
             return True
+        print("LogIn: User or password incorrect")
         return False
-       
-    except Exception:
+        
+    except Exception as e:
+        print(f"LogIn Exception: {e}")
         if connection:
             connection.rollback()
         return False
@@ -173,7 +174,6 @@ def initDatabase():
     try:
         connection = psycopg2.connect(databaseUrl)
         cursor = connection.cursor()
-
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 username VARCHAR(50) UNIQUE NOT NULL,
@@ -181,12 +181,12 @@ def initDatabase():
                 matches JSONB DEFAULT '[]'::jsonb
             );
         ''')
-
         connection.commit()
         cursor.close()
         connection.close()
+        print("Database initialized successfully!")
     except Exception as e:
-        print("Error connecting to Database:", e)
+        print(f"Error in initDatabase: {e}")
 
 initDatabase()
 
