@@ -233,7 +233,7 @@ async def HandlePlayer(player):
                 if enemy:
                     enemyUsername = enemyData[1]
                     waitingPlayers.remove(enemyData)
-                    playingPlayers.append([player, enemy]) # add the players into game array
+                    playingPlayers.append([player, enemy, playerUsername, enemyUsername, [0, 0]]) # add the players into game array
                     playerMessage = {
                         "Action": "StartGame",
                         "EnemyName": enemyUsername or "Guest",
@@ -252,25 +252,35 @@ async def HandlePlayer(player):
                     waitingPlayers.append([playerData, playerUsername])
 
             elif action == "UpdateEnemy":
-                # find the enemy
+                playersEats = data.get("PlayersEats")
                 for match in playingPlayers:
-                    for i in range(len(match)):
-                        if match[i] == player:
-                            enemy = match[1 - i]
-                            await enemy.send(message)
+                    if match[0] == player:
+                        match[4] = playersEats
+                        await match[1].send(message)
+                        break
+                    elif match[1] == player:
+                        match[4] = playersEats
+                        await match[0].send(message)
+                        break
             
             elif action == "GameOver":
-                for match in playingPlayers:
-                    for i in range(len(match)):
-                        if match[i] == player:
-                            enemy = match[1 - i]
-                            playingPlayers.remove(match)
-                            await enemy.send(message)
+                for match in playingPlayers[:]:
+                    if match[0] == player:
+                        enemy = match[1]
+                        playingPlayers.remove(match)
+                        await enemy.send(message)
+                        break
+                    elif match[1] == player:
+                        enemy = match[0]
+                        playingPlayers.remove(match)
+                        await enemy.send(message)
+                        break
 
             elif action == "RemovePlayer":
                 for playerData in waitingPlayers:
                     if playerData[0][0] == player:
                         waitingPlayers.remove(playerData)
+                        break
             elif action == "SignUp":
                 username = data.get("Username")
                 password = data.get("Password")
@@ -313,18 +323,6 @@ async def HandlePlayer(player):
                         }
                         await player.send(json.dumps(message))
 
-            # set draw for the player who leaves the wesite
-            elif action == "UpdateEnemyHistory":
-                username = data.get("Username")
-                result = data.get("Result")
-                eats = data.get("Eats")
-                isOnline = data.get("IsOnline")
-                isSingle = data.get("IsSingle")
-                myTurn = data.get("MyTurn")
-                difficulty = data.get("Difficulty")
-                enemyName = data.get("EnemyName")
-                AddMatchToHistory(username, eats, result, isOnline, isSingle, myTurn, difficulty, enemyName)
-
 
     except websockets.exceptions.ConnectionClosedError:
         pass
@@ -333,19 +331,30 @@ async def HandlePlayer(player):
         for playerData in waitingPlayers:
             if playerData[0][0] == player:
                 waitingPlayers.remove(playerData)
+                break
 
-        # if in a match, send draw to the enemy and remove from list
+        # if playing, save history data for both players
         for match in playingPlayers:
-            for i in range(len(match)):
-                if match[i] == player:
-                    enemy = match[1 - i]
-                    playingPlayers.remove(match)
-                    enemyMessage = {
-                        "Action": "GameOver",
-                        "Request": "EnemyUsername",
-                        "Winner": "Draw"
-                    }
-                    await enemy.send(json.dumps(enemyMessage))
+            if match[0] == player or match[1] == player:
+                playerIndex = match.index(player)
+                enemyIndex = 1 - playerIndex
+                enemySocket = match[enemyIndex]
+                
+                playerUsername = match[2] if playerIndex == 0 else match[3]
+                enemyUsername = match[3] if playerIndex == 0 else match[2]
+                currentEats = match[4]
+                playingPlayers.remove(match)
+                
+                if playerUsername != "Guest":
+                    myTurn = 1 if playerIndex == 0 else 0
+                    AddMatchToHistory(playerUsername, currentEats, "Draw", True, False, myTurn, 0, enemyUsername or "Guest")
+
+                enemyMessage = {
+                    "Action": "GameOver",
+                    "Winner": "Draw" 
+                }
+                await enemySocket.send(json.dumps(enemyMessage))
+                break
 
 async def main():
     async with websockets.serve(HandlePlayer, "0.0.0.0", 10000):
