@@ -327,7 +327,7 @@ async def HandlePlayer(player):
     except websockets.exceptions.ConnectionClosedError:
         pass
     finally:
-        # remove from witing list
+        # remove from waiting list
         for playerData in waitingPlayers:
             if playerData[0][0] == player:
                 waitingPlayers.remove(playerData)
