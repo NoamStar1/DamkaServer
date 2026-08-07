@@ -9,7 +9,7 @@ import websockets # online server
 import psycopg2 # data base (supabase.com)
 from psycopg2 import errors
 
-databaseUrl = "postgresql://postgres.ywiazghmzxtdflwirwrg:damkadatabase8339@aws-0-eu-west-1.pooler.supabase.com:6543/postgres?sslmode=require"
+databaseUrl = "postgresql://postgres.ywiazghmzxtdflwirwrg:damkadatabase8339@aws-1-eu-west-1.pooler.supabase.com:6543/postgres"
 playingPlayers = []
 waitingPlayers = []
 
