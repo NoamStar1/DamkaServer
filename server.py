@@ -28,13 +28,7 @@ def signUp(username, password):
         connection.commit()
         cursor.close()
         return True
-    except errors.UniqueViolation:
-        print("SignUp: Username already exists")
-        if connection:
-            connection.rollback()
-        return False
-    except Exception as e:
-        print(f"SignUp Exception: {e}")
+    except Exception:
         if connection:
             connection.rollback()
         return False
@@ -57,11 +51,9 @@ def logIn(username, password):
 
         if user:
             return True
-        print("LogIn: User or password incorrect")
         return False
         
-    except Exception as e:
-        print(f"LogIn Exception: {e}")
+    except Exception:
         if connection:
             connection.rollback()
         return False
@@ -162,8 +154,7 @@ def GetMatchesHistory(username):
             return history
         return False
 
-    except Exception as e:
-        print(f"Error in GetMatchesHistory: {e}")
+    except Exception:
         return False
     finally:
         if connection:
@@ -184,7 +175,7 @@ def initDatabase():
         connection.commit()
         cursor.close()
         connection.close()
-        print("Database initialized successfully!")
+        print("database running")
     except Exception as e:
         print(f"Error in initDatabase: {e}")
 
@@ -233,7 +224,7 @@ async def HandlePlayer(player):
                 if enemy:
                     enemyUsername = enemyData[1]
                     waitingPlayers.remove(enemyData)
-                    playingPlayers.append([player, enemy, playerUsername, enemyUsername, [0, 0]]) # add the players into game array
+                    playingPlayers.append([enemy, player, playerUsername, enemyUsername, [0, 0]]) # add the players into game array
                     playerMessage = {
                         "Action": "StartGame",
                         "EnemyName": enemyUsername or "Guest",
@@ -347,7 +338,6 @@ async def HandlePlayer(player):
                 
 
                 winnerColor = "White" if enemyIndex == 0 else "Black"
-
                 if playerUsername != "Guest":
                     myTurn = playerIndex
                     AddMatchToHistory(playerUsername, currentEats, winnerColor, True, False, myTurn, 0, enemyUsername or "Guest")
