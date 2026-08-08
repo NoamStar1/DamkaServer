@@ -339,9 +339,9 @@ async def HandlePlayer(player):
                 winnerColor = "White" if enemyIndex == 0 else "Black"
                 if playerUsername != "Guest":
                     myTurn = playerIndex
-                    AddMatchToHistory(playerUsername, currentEats, winnerColor, True, False, myTurn, 0, enemyUsername or "Guest")
-                print(playerUsername)
-                print(enemyUsername)
+                    oppositeEats = currentEats if playerIndex == 0 else [currentEats[1], currentEats[0]] # opposite eats if black player
+                    AddMatchToHistory(playerUsername, oppositeEats, winnerColor, True, False, myTurn, 0, enemyUsername or "Guest")
+
                 enemyMessage = {
                     "Action": "GameOver",
                     "Winner": winnerColor
