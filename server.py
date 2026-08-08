@@ -345,13 +345,15 @@ async def HandlePlayer(player):
                 currentEats = match[4]
                 playingPlayers.remove(match)
                 
+                winner = "White" if enemyIndex == 0 else "Black"
+                loser = "Black" if player == 0 else "White"
                 if playerUsername != "Guest":
-                    myTurn = 1 if playerIndex == 0 else 0
-                    AddMatchToHistory(playerUsername, currentEats, "Draw", True, False, myTurn, 0, enemyUsername or "Guest")
+                    myTurn = playerIndex
+                    AddMatchToHistory(playerUsername, currentEats, loser, True, False, myTurn, 0, enemyUsername or "Guest")
 
                 enemyMessage = {
                     "Action": "GameOver",
-                    "Winner": "Draw" 
+                    "Winner": winner
                 }
                 await enemySocket.send(json.dumps(enemyMessage))
                 break
