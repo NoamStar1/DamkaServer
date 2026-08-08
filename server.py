@@ -331,17 +331,17 @@ async def HandlePlayer(player):
                 enemyIndex = 1 - playerIndex
                 enemySocket = match[enemyIndex]
                 
-                playerUsername = match[2] if playerIndex == 0 else match[3]
-                enemyUsername = match[3] if playerIndex == 0 else match[2]
+                playerUsername = match[3] if playerIndex == 0 else match[2]
+                enemyUsername = match[2] if playerIndex == 0 else match[3]
                 currentEats = match[4]
                 playingPlayers.remove(match)
-                
 
                 winnerColor = "White" if enemyIndex == 0 else "Black"
                 if playerUsername != "Guest":
                     myTurn = playerIndex
                     AddMatchToHistory(playerUsername, currentEats, winnerColor, True, False, myTurn, 0, enemyUsername or "Guest")
-
+                print(playerUsername)
+                print(enemyUsername)
                 enemyMessage = {
                     "Action": "GameOver",
                     "Winner": winnerColor
