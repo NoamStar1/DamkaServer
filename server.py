@@ -345,8 +345,8 @@ async def HandlePlayer(player):
                 currentEats = match[4]
                 playingPlayers.remove(match)
                 
-                winner = "White" if enemyIndex == 0 else "Black"
-                loser = "White" if player == 0 else "Black"
+                winner = "White" if player == 0 else "Black"
+                loser = "White" if enemyIndex == 0 else "Black"
                 if playerUsername != "Guest":
                     myTurn = playerIndex
                     AddMatchToHistory(playerUsername, currentEats, loser, True, False, myTurn, 0, enemyUsername or "Guest")
