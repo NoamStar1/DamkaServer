@@ -539,8 +539,8 @@ async def HandlePlayer(player):
                         message = {
                         "Action": "NewRequest",
                         "Username": username,
-                    }
-                    await admin.send(json.dumps(message))
+                        }
+                        await admin.send(json.dumps(message))
             elif action == "SignUp":
                 username = data.get("Username")
                 isAccepted = data.get("IsAccepted")
@@ -554,6 +554,13 @@ async def HandlePlayer(player):
                     "Result": result
                 }
                 await player.send(json.dumps(adminMessage))
+                allAdminsMessage = {
+                    "Action": "RequestReponsed",
+                    "Username": username,
+                }
+                for admin in admins:
+                    if admin is not player:
+                        await admin.send(json.dumps(allAdminsMessage))
                 message = {
                     "Action": "SignUp",
                     "Username": username,
@@ -697,6 +704,7 @@ async def HandlePlayer(player):
                 }
                 await enemySocket.send(json.dumps(enemyMessage))
                 break
+        print(admins)
 
 async def main():
     async with websockets.serve(HandlePlayer, "0.0.0.0", 10000):
