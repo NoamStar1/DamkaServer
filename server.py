@@ -1,119 +1,86 @@
 # pip install websockets
 # pip install psycopg2-binary
+# pip install asyncpg
 # python "F:\Internet\Projects\Damka\server.py"
 # not sleeping: uptimerobot.com
 
 import asyncio
 import json
 import websockets # online server
-import psycopg2 # data base (supabase.com)
+import asyncpg # data base (supabase.com)
 
 databaseUrl = "postgresql://postgres.ywiazghmzxtdflwirwrg:damkadatabase8339@aws-1-eu-west-1.pooler.supabase.com:6543/postgres"
+pool = None
 requestPlayers = {}
 players = {}
 admins = []
 playingPlayers = []
 waitingPlayers = []
 
-def isUsernameTaken(cursor, username):
-    cursor.execute('''
-        SELECT 1 FROM users WHERE username = %s
+async def isUsernameTaken(username):
+    query = '''
+        SELECT 1 FROM users WHERE username = $1
         UNION
-        SELECT 1 FROM pending_users WHERE username = %s
-    ''', (username, username))
-    return cursor.fetchone() is not None
+        SELECT 1 FROM pending_users WHERE username = $1
+    '''
+    result = await pool.fetchval(query, username)
+    return result is not None
 
-def getPendingUsers():
-    connection = None
+async def getPendingUsers():
     try:
-        connection = psycopg2.connect(databaseUrl)
-        cursor = connection.cursor()
-
-        cursor.execute("SELECT username, password FROM pending_users;")
+        pendingList = await pool.fetch("SELECT username, password FROM pending_users;")
+        return pendingList
         
-        pending_list = cursor.fetchall()
-        
-        cursor.close()
-        return pending_list
-
     except Exception:
         return []
 
-    finally:
-        if connection:
-            connection.close()
-
-def signUpRequest(username, password):
-    connection = False
+async def signUpRequest(username, password):
     try:
-        connection = psycopg2.connect(databaseUrl)
-        cursor = connection.cursor()
-
-        if isUsernameTaken(cursor, username):
+        if await isUsernameTaken(username):
             return False
-        cursor.execute(
-            "INSERT INTO pending_users (username, password) VALUES (%s, %s)",
-            (username, password)
+
+        await pool.execute(
+            "INSERT INTO pending_users (username, password) VALUES ($1, $2)",
+            username, password
         )
-
-        connection.commit()
-        cursor.close()
         return True
+
     except Exception:
-        if connection:
-            connection.rollback()
         return False
-    finally:
-        if connection:
-            connection.close()
 
-def SignUp(username, isAccepted, socket):
-    connection = None
+async def SignUp(username, isAccepted, socket):
     try:
-        connection = psycopg2.connect(databaseUrl)
-        cursor = connection.cursor()
-
         if isAccepted:
             players[username] = socket
-            cursor.execute("""
+            await pool.execute("""
                 INSERT INTO users (username, password)
                 SELECT username, password
                 FROM pending_users
-                WHERE username = %s;
-            """, (username,))
+                WHERE username = $1;
+            """, username)
 
-        cursor.execute("DELETE FROM pending_users WHERE username = %s;"
-                , (username,))
-
-        connection.commit()
-        cursor.close()
+        await pool.execute("""
+            DELETE FROM pending_users WHERE username = $1;
+        """, username)
         return True
 
     except Exception:
-        if connection:
-            connection.rollback()
         return False
-    finally:
-        if connection:
-            connection.close()
 
 async def logIn(username, password, socket):
-    connection = False
     try:
-        connection = psycopg2.connect(databaseUrl)
-        cursor = connection.cursor()
-
-        cursor.execute(
-            "SELECT is_admin FROM users WHERE username = %s AND password = %s", 
-            (username, password)
+        user = await pool.fetchrow(
+            "SELECT is_admin FROM users WHERE username = $1 AND password = $2", 
+            username, password
         )
-        user = cursor.fetchone()
-        cursor.close()
+        
         if user is not None:
             players[username] = socket
-            if user[0]:
-                admins.append(socket)
-                globalHistory = GetGlobalHistory()
+            if user["is_admin"]:
+                if socket not in admins:
+                    admins.append(socket)
+                
+                globalHistory = await GetGlobalHistory()
                 message = {
                     "Action": "UpdateGlobalHistory",
                     "History": globalHistory,
@@ -123,120 +90,111 @@ async def logIn(username, password, socket):
             return True
         return False
         
-    except Exception as e:
-        print(f"Error in logIn: {e}")
-        if connection:
-            connection.rollback()
+    except Exception:
         return False
 
-    finally:
-        if connection:
-            connection.close()
-
-def DeleteUser(username):
-    connection = None
+async def DeleteUser(username):
     try:
-        connection = psycopg2.connect(databaseUrl)
-        cursor = connection.cursor()
-
-        cursor.execute("DELETE FROM users WHERE username = %s;"
-                , (username,))
-        result = cursor.rowcount > 0 or "WrongUsername"
-
-        connection.commit()
-        cursor.close()
-        return result
+        #               "DELETE 1"
+        status = await pool.execute(
+            "DELETE FROM users WHERE username = $1;",
+            username
+        )
+        #                ["DELETE", "1"]
+        rowsdeleted = int(status.split()[-1])
+        if rowsdeleted > 0:
+            return True
+        return "WrongUsername"
 
     except Exception:
-        if connection:
-            connection.rollback()
         return False
-    finally:
-        if connection:
-            connection.close()
 
-def IsAdmin(username):
-    connection = None
+async def IsAdmin(username):
     try:
-        connection = psycopg2.connect(databaseUrl)
-        cursor = connection.cursor()
-
-        cursor.execute("""
-            SELECT is_admin FROM users WHERE username = %s
-        """, (username,))
-
-        result = cursor.fetchone()
-        cursor.close()
-
-        if result is not None:
-            return result[0]
-        return None
+        isAdmin = await pool.fetchval(
+            "SELECT is_admin FROM users WHERE username = $1;",
+            username
+        )
+        return isAdmin
 
     except Exception:
-        if connection:
-            connection.rollback()
         return None
-    finally:
-        if connection:
-            connection.close()
 
-def ManageAdmin(username, isAdmin):
-    connection = None
+async def ManageAdmin(username, isAdmin):
     try:
-        connection = psycopg2.connect(databaseUrl)
-        cursor = connection.cursor()
-
-        cursor.execute("""
+        #               "UPDATE 1"
+        status = await pool.execute("""
             UPDATE users
-            SET is_admin = %s
-            WHERE username = %s;
-        """, (isAdmin, username))
+            SET is_admin = $1
+            WHERE username = $2;
+        """, isAdmin, username)
+        #                ["UPDATE", "1"]
+        rows_updated = int(status.split()[-1])
+        return rows_updated > 0
 
-        connection.commit()
-        cursor.close()
+    except Exception:
+        return False
+
+async def GetPoints(username):
+    try:
+        points = await pool.fetchval(
+            "SELECT points FROM users WHERE username = $1;",
+            username,
+        )
+        return points
+
+    except Exception:
+        return False
+
+async def AddPoints(username, pointsToAdd):
+    try:
+        await pool.execute(
+            "UPDATE users SET points = points + $1 WHERE username = $2;",
+            pointsToAdd, username,
+        )
         return True
 
     except Exception:
-        if connection:
-            connection.rollback()
         return False
-    finally:
-        if connection:
-            connection.close()
 
-def GetMatchesHistory(username):
-    connection = False
+async def GetLeaderboard():
     try:
-        connection = psycopg2.connect(databaseUrl)
-        cursor = connection.cursor()
+        rows = await pool.fetch('''
+            SELECT username, points
+            FROM users
+            ORDER BY points DESC
+            LIMIT 100;
+        ''')
+        leaderboard = []
+        for row in rows:
+            data = {
+                "Username": row["username"],
+                "Points": row["points"],
+            }
+            leaderboard.append(data)
+        return leaderboard
 
-        cursor.execute('''
+    except Exception:
+        return False
+
+async def GetMatchesHistory(username):
+    try:
+        history = await pool.fetchval('''
             SELECT matches 
-            FROM users 
-            WHERE username = %s;
-        ''', (username,))
+            FROM users
+            WHERE username = $1;
+        ''', username)
 
-        row = cursor.fetchone()
-        cursor.close()
-
-        if row:
-            history = row[0]
+        if history is not None:
             return history
         return False
 
     except Exception:
         return False
-    finally:
-        if connection:
-            connection.close()
 
-def GetGlobalHistory():
-    connection = False
+async def GetGlobalHistory():
     try:
-        connection = psycopg2.connect(databaseUrl)
-        cursor = connection.cursor()
-
-        cursor.execute('''
+        rows = await pool.fetch('''
             SELECT player1_name, player1_eats,
                    player2_name, player2_eats,
                    winner
@@ -244,87 +202,82 @@ def GetGlobalHistory():
             ORDER BY id DESC
             LIMIT 20;
         ''')
-        rows = cursor.fetchall()
-        cursor.close()
-
         history = []
         for row in rows:
-            history.append({
-                "Player1Name": row[0],
-                "Player1Eats": row[1],
-                "Player2Name": row[2],
-                "Player2Eats": row[3],
-                "Winner": row[4]
-            })
+            matchDict = {
+                "Player1Name": row["player1_name"],
+                "Player1Eats": row["player1_eats"],
+                "Player2Name": row["player2_name"],
+                "Player2Eats": row["player2_eats"],
+                "Winner": row["winner"]
+            }
+            history.append(matchDict)
         return history
 
     except Exception:
         return False
-    finally:
-        if connection:
-            connection.close()
 
 async def AddMatchToHistory(username, eats, result, isOnline, isSingle, myTurn, difficulty, enemyName):
-    connection = False
     try:
-        connection = psycopg2.connect(databaseUrl)
-        cursor = connection.cursor()
+        if username:
+            matchType = False
+            playerName = username
         
-        # set all data
-        matchType = False
-        playerName = username
-        if isOnline:
-            matchType = "Online"
-            if (result == "White" and myTurn == 0) or (result == "Black" and myTurn == 1):
-                result = "WIN"
-            elif (result == "White" and myTurn == 1) or (result == "Black" and myTurn == 0):
-                result = "LOSE"
+            if isOnline:
+                matchType = "Online"
+                if (result == "White" and myTurn == 0) or (result == "Black" and myTurn == 1):
+                    result = "WIN"
+                elif (result == "White" and myTurn == 1) or (result == "Black" and myTurn == 0):
+                    result = "LOSE"
+                else:
+                    result = "DRAW"
+
+            elif isSingle:
+                matchType = "Single-Player"
+                if result == "White":
+                    result = "WIN"
+                elif result == "Black":
+                    result = "LOSE"
+                else:
+                    result = "DRAW"
+
+                if difficulty == 1:
+                    enemyName = "Easy-AI"
+                elif difficulty == 2:
+                    enemyName = "Medium-AI"
+                elif difficulty == 3:
+                    enemyName = "Hard-AI"
+
             else:
-                result = "DRAW"
+                matchType = "Multiplayer"
+                playerName = "White"
+                enemyName = "Black"
 
-        elif isSingle:
-            matchType = "Single-Player"
-            if result == "White":
-                result = "WIN"
-            elif result == "Black":
-                result = "LOSE"
-            else:
-                result = "DRAW"
-            if difficulty == 1:
-                enemyName = "Easy-AI"
-            elif difficulty == 2:
-                enemyName = "Medium-AI"
-            elif difficulty == 3:
-                enemyName = "Hard-AI"
+            newMatch = json.dumps([{
+                "MatchType": matchType,
+                "Result": result,
+                "Eats": eats,
+                "PlayerName": playerName,
+                "EnemyName": enemyName
+            }])
 
-        else:
-            matchType = "Multiplayer"
-            playerName = "White"
-            enemyName = "Black"
+            # save last 15 matches
+            await pool.execute('''
+                UPDATE users
+                SET matches = (
+                    SELECT COALESCE(jsonb_agg(elem ORDER BY ord), '[]'::jsonb)
+                    FROM (
+                        SELECT elem, ord
+                        FROM jsonb_array_elements(COALESCE(matches, '[]'::jsonb) || $1::jsonb) WITH ORDINALITY AS t(elem, ord)
+                        ORDER BY ord DESC
+                        LIMIT 15
+                    ) sub
+                )
+                WHERE username = $2;
+            ''', newMatch, username)
 
-        newMatch = json.dumps([{
-            "MatchType": matchType,
-            "Result": result,
-            "Eats": eats,
-            "PlayerName": playerName,
-            "EnemyName": enemyName
-        }])
-
-        cursor.execute('''
-            UPDATE users
-            SET matches = (
-                SELECT COALESCE(jsonb_agg(elem ORDER BY ord), '[]'::jsonb)
-                FROM (
-                    SELECT elem, ord
-                    FROM jsonb_array_elements(COALESCE(matches, '[]'::jsonb) || %s::jsonb) WITH ORDINALITY AS t(elem, ord)
-                    ORDER BY ord DESC
-                    LIMIT 15
-                ) sub
-            )
-            WHERE username = %s;
-        ''', (newMatch, username))
-
-        if isOnline and myTurn == 0: # add only one time, for the first player (dosent matter which player)
+        # global history update
+        if isOnline and myTurn == 0:
             if result == "WIN":
                 winnerName = playerName
             elif result == "LOSE":
@@ -332,12 +285,14 @@ async def AddMatchToHistory(username, eats, result, isOnline, isSingle, myTurn, 
             else:
                 winnerName = "DRAW"
 
-            cursor.execute('''
+            # add a new match to global history
+            await pool.execute('''
                 INSERT INTO global_history (player1_name, player1_eats, player2_name, player2_eats, winner)
-                VALUES (%s, %s, %s, %s, %s);
-            ''', (playerName, eats[0], enemyName, eats[1], winnerName))
+                VALUES ($1, $2, $3, $4, $5);
+            ''', playerName, eats[0], enemyName, eats[1], winnerName)
 
-            cursor.execute('''
+            # limit global history matches to 20
+            await pool.execute('''
                 DELETE FROM global_history
                 WHERE id NOT IN (
                     SELECT id FROM global_history
@@ -345,109 +300,102 @@ async def AddMatchToHistory(username, eats, result, isOnline, isSingle, myTurn, 
                     LIMIT 20
                 );
             ''')
-            connection.commit()
 
-            # update admins
-            globalHistory = GetGlobalHistory()
+            globalHistory = await GetGlobalHistory()
             message = {
                 "Action": "UpdateGlobalHistory",
                 "History": globalHistory,
             }
             for admin in admins:
                 await admin.send(json.dumps(message))
-
-        connection.commit()
-        cursor.close()
         return True
 
     except Exception:
-        if connection:
-            connection.rollback()
         return False
-    finally:
-        if connection:
-            connection.close()
 
-def initDatabase():
+
+async def initDatabase():
+    global pool
     try:
-        connection = psycopg2.connect(databaseUrl)
-        cursor = connection.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                username VARCHAR(20) UNIQUE NOT NULL,
-                password VARCHAR(20) NOT NULL,
-                is_admin BOOLEAN DEFAULT FALSE,
-                matches JSONB DEFAULT '[]'::jsonb
-            );
+        pool = await asyncpg.create_pool(databaseUrl, statement_cache_size=0)
+        await pool.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    username VARCHAR(20) UNIQUE NOT NULL,
+                    password VARCHAR(20) NOT NULL,
+                    is_admin BOOLEAN DEFAULT FALSE,
+                    points INT DEFAULT 0,
+                    matches JSONB DEFAULT '[]'::jsonb
+                );
+               
+                CREATE TABLE IF NOT EXISTS pending_users (
+                    username VARCHAR(20) UNIQUE NOT NULL,
+                    password VARCHAR(20) NOT NULL
+                );
 
-            CREATE TABLE IF NOT EXISTS pending_users (
-                username VARCHAR(20) UNIQUE NOT NULL,
-                password VARCHAR(20) NOT NULL
-            );
-
-           CREATE TABLE IF NOT EXISTS global_history (
-               id SERIAL PRIMARY KEY,
-               player1_name VARCHAR(20) NOT NULL,
-               player1_eats INTEGER DEFAULT 0,
-               player2_name VARCHAR(20) NOT NULL,
-               player2_eats INTEGER DEFAULT 0,
-               winner VARCHAR(20) NOT NULL
-           );
-        ''')
-        connection.commit()
-        cursor.close()
-        connection.close()
-        print("database running")
+                CREATE TABLE IF NOT EXISTS global_history (
+                    id SERIAL PRIMARY KEY,
+                    player1_name VARCHAR(20) NOT NULL,
+                    player1_eats INTEGER DEFAULT 0,
+                    player2_name VARCHAR(20) NOT NULL,
+                    player2_eats INTEGER DEFAULT 0,
+                    winner VARCHAR(20) NOT NULL
+                );
+            ''')
+        print("database running.")
     except Exception as e:
         print(f"Error in initDatabase: {e}")
 
-initDatabase()
-
-def inspectTables():
+async def inspectTables():
     try:
-        connection = psycopg2.connect(databaseUrl)
-        cursor = connection.cursor()
-
         tables = ['users', 'pending_users', 'global_history']
 
         for table in tables:
             print(f"--- Table: {table} ---")
 
-            cursor.execute("""
+            columns = await pool.fetch("""
                 SELECT column_name 
                 FROM information_schema.columns 
-                WHERE table_name = %s;
-            """, (table,))
-            columns = cursor.fetchall()
-            print("Columns:", [col[0] for col in columns])
+                WHERE table_name = $1;
+            """, table)
+            
+            print("Columns:", [col["column_name"] for col in columns])
 
-            cursor.execute(f"SELECT * FROM {table};")
-            rows = cursor.fetchall()
-            print("Data:", rows)
+            rows = await pool.fetch(f"SELECT * FROM {table};")
+            
+            data = [dict(row) for row in rows]
+            print("Data:", data)
             print()
 
-        cursor.close()
-        connection.close()
     except Exception as e:
         print(f"Error inspecting database: {e}")
 
-#inspectTables()
-
-def resetDatabase():
+async def resetDatabase():
     try:
-        connection = psycopg2.connect(databaseUrl)
-        cursor = connection.cursor()
-
-        cursor.execute("DROP TABLE IF EXISTS global_history CASCADE;")
-
-        connection.commit()
-        cursor.close()
-        connection.close()
-        print("Database reseted successfully!")
+        await pool.execute("DROP TABLE IF EXISTS global_history CASCADE;")
+        print("Database reset successfully!")
     except Exception as e:
         print(f"Error dropping table: {e}")
 
 #resetDatabase()
+
+
+# update leaderboard for all players every 60 seconds
+async def LeaderboardLoop():
+    while True:
+        try:
+            await asyncio.sleep(60)
+            leaderboard = await GetLeaderboard()
+            if leaderboard is not False:
+                message = {
+                    "Action": "UpdateLeaderboard",
+                    "Leaderboard": leaderboard,
+                }
+                await asyncio.gather(
+                    *[player.send(json.dumps(message)) for player in players.values()],
+                    return_exceptions=True
+                )
+        except Exception:
+            pass
 
 async def HandlePlayer(player):
     try:
@@ -526,7 +474,7 @@ async def HandlePlayer(player):
             elif action == "SignUpRequest":
                 username = data.get("Username")
                 password = data.get("Password")
-                result = signUpRequest(username, password)
+                result = await signUpRequest(username, password)
                 requestPlayers[username] = player
                 message = {
                     "Action": "SignUpRequest",
@@ -545,7 +493,7 @@ async def HandlePlayer(player):
                 username = data.get("Username")
                 isAccepted = data.get("IsAccepted")
                 socket = requestPlayers.get(username)
-                result = SignUp(username, isAccepted, socket)
+                result = await SignUp(username, isAccepted, socket)
                 requestPlayers.pop(username, None) # if not exits, return None and prevent error
                 adminMessage = {
                     "Action": "SignUpResult",
@@ -575,21 +523,25 @@ async def HandlePlayer(player):
                 username = data.get("Username")
                 password = data.get("Password")
                 result = await logIn(username, password, player)
-                history = GetMatchesHistory(username)
+                history = await GetMatchesHistory(username)
+                points = await GetPoints(username)
+                leaderboard = await GetLeaderboard()
                 pendingUsers = False
                 if result == "Admin":
-                    pendingUsers = [user[0] for user in getPendingUsers()] # get all pending usernames in array
+                    pendingUsers = [user[0] for user in await getPendingUsers()] # get all pending usernames in array
                 message = {
                     "Action": "LogIn",
                     "Username": username,
                     "Result": result,
+                    "Points": points,
                     "History": history,
+                    "Leaderboard": leaderboard,
                     "PendingUsers": pendingUsers
                 }
                 await player.send(json.dumps(message))
             elif action == "DeleteUser":
                 username = data.get("Username")
-                result = DeleteUser(username)
+                result = await DeleteUser(username)
                 adminMessage = {
                     "Action": "DeleteResult",
                     "Username": username,
@@ -603,7 +555,7 @@ async def HandlePlayer(player):
                     pass
             elif action == "SearchAdmin":
                 username = data.get("Username")
-                result = IsAdmin(username)
+                result = await IsAdmin(username)
                 message = {
                     "Action": "SearchAdminResult",
                     "Username": username,
@@ -613,7 +565,7 @@ async def HandlePlayer(player):
             elif action == "ManageAdmin":
                 username = data.get("Username")
                 isAdmin = data.get("IsAdmin")
-                result = ManageAdmin(username, isAdmin)
+                result = await ManageAdmin(username, isAdmin)
                 adminMessage = {
                     "Action": "ManageAdminResult",
                     "IsAdmin": isAdmin,
@@ -643,9 +595,11 @@ async def HandlePlayer(player):
                 myTurn = data.get("MyTurn")
                 difficulty = data.get("Difficulty")
                 enemyName = data.get("EnemyName")
+                pointsToAdd = data.get("PointsToAdd")
                 result = await AddMatchToHistory(username, eats, result, isOnline, isSingle, myTurn, difficulty, enemyName)
+                await AddPoints(username, pointsToAdd)
                 if result:
-                    matchesHistory = GetMatchesHistory(username)
+                    matchesHistory = await GetMatchesHistory(username)
                     if matchesHistory:
                         message = {
                             "Action": "UpdateMatchesHistory",
@@ -653,7 +607,6 @@ async def HandlePlayer(player):
                             "History": matchesHistory
                         }
                         await player.send(json.dumps(message))
-
 
     except websockets.exceptions.ConnectionClosedError:
         pass
@@ -704,11 +657,15 @@ async def HandlePlayer(player):
                 }
                 await enemySocket.send(json.dumps(enemyMessage))
                 break
-        print(admins)
+
+            # update leaderboard for all players every 60 seconds
+
 
 async def main():
+    await initDatabase()
+    # await inspectTables()
+    asyncio.create_task(LeaderboardLoop())
     async with websockets.serve(HandlePlayer, "0.0.0.0", 10000):
         await asyncio.Future()
 
-if __name__ == "__main__":
-    asyncio.run(main())
+asyncio.run(main())
