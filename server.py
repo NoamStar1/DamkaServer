@@ -79,13 +79,6 @@ async def logIn(username, password, socket):
             if user["is_admin"]:
                 if socket not in admins:
                     admins.append(socket)
-                
-                globalHistory = await GetGlobalHistory()
-                message = {
-                    "Action": "UpdateGlobalHistory",
-                    "History": globalHistory,
-                }
-                await socket.send(json.dumps(message))
                 return "Admin"
             return True
         return False
@@ -493,6 +486,7 @@ async def HandlePlayer(player):
                 username = data.get("Username")
                 isAccepted = data.get("IsAccepted")
                 socket = requestPlayers.get(username)
+                leaderboard = await GetLeaderboard()
                 result = await SignUp(username, isAccepted, socket)
                 requestPlayers.pop(username, None) # if not exits, return None and prevent error
                 adminMessage = {
@@ -513,6 +507,7 @@ async def HandlePlayer(player):
                     "Action": "SignUp",
                     "Username": username,
                     "IsAccepted": isAccepted,
+                    "Leaderboard": leaderboard,
                     "Result": result
                 }
                 try:
@@ -524,8 +519,9 @@ async def HandlePlayer(player):
                 password = data.get("Password")
                 result = await logIn(username, password, player)
                 history = await GetMatchesHistory(username)
-                points = await GetPoints(username)
                 leaderboard = await GetLeaderboard()
+                globalHistory = await GetGlobalHistory()
+                points = await GetPoints(username)
                 pendingUsers = False
                 if result == "Admin":
                     pendingUsers = [user[0] for user in await getPendingUsers()] # get all pending usernames in array
@@ -534,8 +530,9 @@ async def HandlePlayer(player):
                     "Username": username,
                     "Result": result,
                     "Points": points,
-                    "History": history,
                     "Leaderboard": leaderboard,
+                    "History": history,
+                    "GlobalHistory": globalHistory,
                     "PendingUsers": pendingUsers
                 }
                 await player.send(json.dumps(message))
@@ -565,6 +562,8 @@ async def HandlePlayer(player):
             elif action == "ManageAdmin":
                 username = data.get("Username")
                 isAdmin = data.get("IsAdmin")
+                globalHistory = await GetGlobalHistory()
+                pendingUsers = [user[0] for user in await getPendingUsers()] # get all pending usernames in array
                 result = await ManageAdmin(username, isAdmin)
                 adminMessage = {
                     "Action": "ManageAdminResult",
@@ -574,6 +573,8 @@ async def HandlePlayer(player):
                 message = {
                     "Action": "UserAdminResult",
                     "IsAdmin": isAdmin,
+                    "GlobalHistory": globalHistory,
+                    "PendingUsers": pendingUsers,
                     "Result": result
                 }
                 await player.send(json.dumps(adminMessage))
