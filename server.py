@@ -75,6 +75,12 @@ async def logIn(username, password, socket):
         )
         
         if user is not None:
+            # if player is already playing - disconnect them
+            message = { "Action": "Refresh"}
+            try: 
+                await players[username].send(json.dumps(message))
+            except:
+                pass
             players[username] = socket
             if user["is_admin"]:
                 if socket not in admins:
@@ -236,9 +242,9 @@ async def AddMatchToHistory(username, eats, result, isOnline, isSingle, myTurn, 
 
                 if difficulty == 1:
                     enemyName = "Easy-AI"
-                elif difficulty == 2:
-                    enemyName = "Medium-AI"
                 elif difficulty == 3:
+                    enemyName = "Medium-AI"
+                elif difficulty == 8:
                     enemyName = "Hard-AI"
 
             else:
@@ -545,7 +551,7 @@ async def HandlePlayer(player):
                     "Result": result
                 }
                 await player.send(json.dumps(adminMessage))
-                message = { "Action": "DeleteUser"}
+                message = { "Action": "Refresh"}
                 try: 
                     await players[username].send(json.dumps(message))
                 except:
