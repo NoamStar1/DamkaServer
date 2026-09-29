@@ -1,6 +1,6 @@
-# pip install websockets
+# pip install websockets || py -m pip install websockets
 # pip install psycopg2-binary
-# pip install asyncpg
+# pip install asyncpg || py -m pip install asyncpg
 # python "F:\Internet\Projects\Damka\server.py"
 # not sleeping: uptimerobot.com
 
@@ -145,7 +145,7 @@ async def GetPoints(username):
     except Exception:
         return False
 
-async def AddPoints(username, pointsToAdd):
+async def UpdatePoints(username, pointsToAdd):
     try:
         await pool.execute(
             "UPDATE users SET points = points + $1 WHERE username = $2;",
@@ -159,7 +159,7 @@ async def AddPoints(username, pointsToAdd):
 async def GetLeaderboard():
     try:
         rows = await pool.fetch('''
-            SELECT username, points
+            SELECT username, points, equipped_items ->> 'CoinIcon' AS coin_icon, equipped_items ->> 'NameStyle' AS name_style
             FROM users
             ORDER BY points DESC
             LIMIT 100;
@@ -169,6 +169,8 @@ async def GetLeaderboard():
             data = {
                 "Username": row["username"],
                 "Points": row["points"],
+                "CoinIcon": row["coin_icon"],
+                "NameStyle": row["name_style"]
             }
             leaderboard.append(data)
         return leaderboard
@@ -312,6 +314,64 @@ async def AddMatchToHistory(username, eats, result, isOnline, isSingle, myTurn, 
     except Exception:
         return False
 
+async def BuyItem(username, itemType, itemName, itemPrice):
+    try:
+        # add the itemName into items data, into the itemType array, if not exist already
+        query = '''
+            UPDATE users
+            SET items = jsonb_set(
+                items,
+                ARRAY[$1::text],
+                (items->$1) || to_jsonb($2::text)
+            )
+            WHERE username = $3
+            AND NOT (items->$1 @> to_jsonb($2::text));
+        '''
+        result = await pool.execute(query, itemType, itemName, username)
+        if result == "UPDATE 1":
+            await UpdatePoints(username, -itemPrice)
+            return True
+        return False
+    except Exception:
+        return False
+
+async def EquipItem(username, itemType, itemName):
+    try:
+        query = '''
+            UPDATE users
+            SET equipped_items = jsonb_set(
+                equipped_items,
+                ARRAY[$1::text],
+                to_jsonb($2::text)
+            )
+            WHERE username = $3
+        '''
+        result = await pool.execute(query, itemType, itemName, username)
+        
+        if result == "UPDATE 1":
+            return True
+        return False
+
+    except Exception as e:
+        return False
+
+async def GetItems(username):
+    try:
+        row = await pool.fetchrow('''
+            SELECT items, equipped_items 
+            FROM users 
+            WHERE username = $1;
+        ''', username)
+
+        items = row['items']
+        equipped_items = row['equipped_items']
+        return {
+            "Owned": items,
+            "Equipped": equipped_items
+        }
+
+    except Exception as e:
+        return False
 
 async def initDatabase():
     global pool
@@ -323,7 +383,19 @@ async def initDatabase():
                     password VARCHAR(20) NOT NULL,
                     is_admin BOOLEAN DEFAULT FALSE,
                     points INT DEFAULT 0,
-                    matches JSONB DEFAULT '[]'::jsonb
+                    matches JSONB DEFAULT '[]'::jsonb,
+                    items JSONB DEFAULT '{
+                        "PieceSkin": ["Basic"],
+                        "CoinIcon": ["Bronze"],
+                        "NameStyle": ["Basic"],
+                        "Background": ["Purple"]
+                    }'::jsonb,
+                    equipped_items JSONB DEFAULT '{
+                        "PieceSkin": "Basic",
+                        "CoinIcon": "Bronze",
+                        "NameStyle": "Basic",
+                        "Background": "Purple"
+                    }'::jsonb
                 );
                
                 CREATE TABLE IF NOT EXISTS pending_users (
@@ -375,8 +447,23 @@ async def resetDatabase():
     except Exception as e:
         print(f"Error dropping table: {e}")
 
-#resetDatabase()
+async def ResetUserItems(username):
+    global pool
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute('''
+                UPDATE users 
+                SET items = DEFAULT, 
+                    equipped_items = DEFAULT 
+                WHERE username = $1;
+            ''', username)
+        print(f"Items reset to default for {username}")
+        return True
+    except Exception as e:
+        print(f"Error in ResetUserItems: {e}")
+        return False
 
+#resetDatabase()
 
 # update leaderboard for all players every 60 seconds
 async def LeaderboardLoop():
@@ -404,7 +491,9 @@ async def HandlePlayer(player):
             if action == "WaitingPlayer":
                 playerUsername = data.get("Username")
                 settings = data.get("Settings")
-                playerData = [player, settings]
+                pieceName = data.get("PieceName")
+                nameStyle = data.get("NameStyle")
+                playerData = [player, settings, pieceName, nameStyle]
                 enemy = False
                 # try to find an enemy
                 for enemyData in waitingPlayers:
@@ -421,16 +510,22 @@ async def HandlePlayer(player):
                 # if they have the same settings, take them into a game
                 if enemy:
                     enemyUsername = enemyData[1]
+                    enemyPiece = enemyData[0][2]
+                    enemyNameStyle = enemyData[0][3]
                     waitingPlayers.remove(enemyData)
                     playingPlayers.append([enemy, player, playerUsername, enemyUsername, [0, 0]]) # add the players into game array
                     playerMessage = {
                         "Action": "StartGame",
                         "EnemyName": enemyUsername or "Guest",
+                        "EnemyPiece": enemyPiece,
+                        "NameStyle": enemyNameStyle,
                         "Turn": 1,
                     }
                     enemyMessage = {
                         "Action": "StartGame",
                         "EnemyName": playerUsername or "Guest",
+                        "EnemyPiece": pieceName,
+                        "NameStyle": nameStyle,
                         "Turn": 0,
                     }
                     await player.send(json.dumps(playerMessage))
@@ -494,6 +589,7 @@ async def HandlePlayer(player):
                 socket = requestPlayers.get(username)
                 leaderboard = await GetLeaderboard()
                 result = await SignUp(username, isAccepted, socket)
+                items = await GetItems(username)
                 requestPlayers.pop(username, None) # if not exits, return None and prevent error
                 adminMessage = {
                     "Action": "SignUpResult",
@@ -514,6 +610,7 @@ async def HandlePlayer(player):
                     "Username": username,
                     "IsAccepted": isAccepted,
                     "Leaderboard": leaderboard,
+                    "Items": items,
                     "Result": result
                 }
                 try:
@@ -528,6 +625,7 @@ async def HandlePlayer(player):
                 leaderboard = await GetLeaderboard()
                 globalHistory = await GetGlobalHistory()
                 points = await GetPoints(username)
+                items = await GetItems(username)
                 pendingUsers = False
                 if result == "Admin":
                     pendingUsers = [user[0] for user in await getPendingUsers()] # get all pending usernames in array
@@ -536,6 +634,7 @@ async def HandlePlayer(player):
                     "Username": username,
                     "Result": result,
                     "Points": points,
+                    "Items": items,
                     "Leaderboard": leaderboard,
                     "History": history,
                     "GlobalHistory": globalHistory,
@@ -604,7 +703,7 @@ async def HandlePlayer(player):
                 enemyName = data.get("EnemyName")
                 pointsToAdd = data.get("PointsToAdd")
                 result = await AddMatchToHistory(username, eats, result, isOnline, isSingle, myTurn, difficulty, enemyName)
-                await AddPoints(username, pointsToAdd)
+                await UpdatePoints(username, pointsToAdd)
                 if result:
                     matchesHistory = await GetMatchesHistory(username)
                     if matchesHistory:
@@ -613,7 +712,38 @@ async def HandlePlayer(player):
                             "Username": username,
                             "History": matchesHistory
                         }
-                        await player.send(json.dumps(message))
+                        try:
+                            await player.send(json.dumps(message))
+                        except:
+                           pass
+            elif action == "BuyItem":
+                username = data.get("Username")
+                itemType = data.get("ItemType")
+                itemName = data.get("ItemName")
+                itemPrice = data.get("ItemPrice")
+                result = await BuyItem(username, itemType, itemName, itemPrice)
+                message = {
+                    "Action": "BuyItemResult",
+                    "Username": username,
+                    "ItemType": itemType,
+                    "ItemName": itemName,
+                    "ItemPrice": itemPrice,
+                    "Result": result
+                }
+                await player.send(json.dumps(message))
+            elif action == "EquipItem":
+                username = data.get("Username")
+                itemType = data.get("ItemType")
+                itemName = data.get("ItemName")
+                result = await EquipItem(username, itemType, itemName)
+                message = {
+                    "Action": "EquipItemResult",
+                    "Username": username,
+                    "ItemType": itemType,
+                    "ItemName": itemName,
+                    "Result": result
+                }
+                await player.send(json.dumps(message))
 
     except websockets.exceptions.ConnectionClosedError:
         pass
@@ -667,10 +797,11 @@ async def HandlePlayer(player):
 
             # update leaderboard for all players every 60 seconds
 
-
 async def main():
     await initDatabase()
-    # await inspectTables()
+    #await inspectTables()
+    #await ResetUserItems("NoamNak")
+    #await UpdatePoints("NoamStar", -420)
     asyncio.create_task(LeaderboardLoop())
     async with websockets.serve(HandlePlayer, "0.0.0.0", 10000):
         await asyncio.Future()
