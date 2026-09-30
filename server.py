@@ -373,6 +373,19 @@ async def GetItems(username):
     except Exception as e:
         return False
 
+async def GetAllUsernames():
+    try:
+        rows = await pool.fetch('SELECT username FROM users;')
+        # transform into Array
+        usernames = []
+        for row in rows:
+            usernames.append(row['username'])
+        return usernames
+
+    except Exception:
+        return []
+
+
 async def initDatabase():
     global pool
     try:
@@ -640,7 +653,10 @@ async def HandlePlayer(player):
                     "GlobalHistory": globalHistory,
                     "PendingUsers": pendingUsers
                 }
-                await player.send(json.dumps(message))
+                try:
+                    await player.send(json.dumps(message))
+                except:
+                    pass
             elif action == "DeleteUser":
                 username = data.get("Username")
                 result = await DeleteUser(username)
@@ -692,6 +708,13 @@ async def HandlePlayer(player):
                     await userSocket.send(json.dumps(message))
                 except:
                     pass
+            elif action == "GetUsernames":
+                usernames = await GetAllUsernames()
+                message = {
+                    "Action": "GetUsernamesResult",
+                    "Usernames": usernames,
+                }
+                await player.send(json.dumps(message))
             elif action == "AddMatch":
                 username = data.get("Username")
                 result = data.get("Result")
@@ -715,7 +738,7 @@ async def HandlePlayer(player):
                         try:
                             await player.send(json.dumps(message))
                         except:
-                           pass
+                            pass
             elif action == "BuyItem":
                 username = data.get("Username")
                 itemType = data.get("ItemType")
@@ -792,16 +815,18 @@ async def HandlePlayer(player):
                     "Action": "GameOver",
                     "Winner": winnerColor
                 }
-                await enemySocket.send(json.dumps(enemyMessage))
+                try:
+                    await enemySocket.send(json.dumps(enemyMessage))
+                except:
+                    pass
                 break
 
-            # update leaderboard for all players every 60 seconds
 
 async def main():
     await initDatabase()
     #await inspectTables()
     #await ResetUserItems("NoamNak")
-    #await UpdatePoints("NoamStar", -420)
+    #await UpdatePoints("Booogi", 10000)
     asyncio.create_task(LeaderboardLoop())
     async with websockets.serve(HandlePlayer, "0.0.0.0", 10000):
         await asyncio.Future()
